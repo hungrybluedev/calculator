@@ -26,13 +26,14 @@ html {
   padding: 2rem;
   text-align: right;
   align-items: center;
+  min-height: 2rem;
 }
 
 #equation {
   font-size: larger;
 }
 
-#result {
+#primary {
   font-size: xx-large;
 }
 
