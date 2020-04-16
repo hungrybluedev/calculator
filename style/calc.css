@@ -1,4 +1,5 @@
 html {
+  /* This is the font for all the buttons. */
   font-family: "Roboto Sans", sans-serif;
   --border-radius-amount: 0.5rem;
   --component-spacing: 0.5rem;
@@ -6,20 +7,22 @@ html {
 }
 
 #calc {
-  width: 28rem;
-  height: 70vh;
-  min-height: 45rem;
+  width: 34rem;
+  height: 90vh;
+  min-height: 50rem;
   /* This margin assignment centers the div */
-  margin: 6rem auto;
+  margin: 1rem auto;
   padding: 2rem;
   background-color: #403e47;
   border-radius: 1rem;
   display: grid;
-  grid-template: "screen screen screen screen" 3fr "btn-mc btn-mr btn-mp btn-mm" 1fr "btn-pct btn-ac btn-cl btn-del" 2fr "btn-rcp btn-sqr btn-sqrt btn-div" 2fr "btn-7 btn-8 btn-9 btn-mul" 2fr "btn-4 btn-5 btn-6 btn-sub" 2fr "btn-1 btn-2 btn-3 btn-add" 2fr "btn-pm btn-0 btn-dot btn-eq" 2fr;
+  grid-template: "screen screen screen screen" 2.7fr "btn-mc btn-mr btn-mp btn-mm" 1fr "btn-pct btn-ac btn-cl btn-del" 2fr "btn-rcp btn-sqr btn-sqrt btn-div" 2fr "btn-7 btn-8 btn-9 btn-mul" 2fr "btn-4 btn-5 btn-6 btn-sub" 2fr "btn-1 btn-2 btn-3 btn-add" 2fr "btn-pm btn-0 btn-dot btn-eq" 2fr;
 }
 
 #screen {
   background-color: #b7c8a6;
+  color: #181b15;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
   border-radius: var(--border-radius-amount);
   margin: var(--component-spacing);
   grid-area: screen;
@@ -30,18 +33,18 @@ html {
 }
 
 #equation {
-  font-size: larger;
+  font-size: 1.2rem;
 }
 
 #primary {
-  font-size: xx-large;
+  font-size: 2.1rem;
 }
 
 #calc button {
   border: none;
   border-radius: var(--border-radius-amount);
   margin: var(--component-spacing);
-  font-size: 1.5rem;
+  font-size: 1.8rem;
   min-width: 4rem;
   padding: var(--component-spacing);
   /* min-height: 5rem; */
