@@ -7,7 +7,7 @@ html {
 }
 
 #calc {
-  width: 34rem;
+  width: 35rem;
   height: 90vh;
   min-height: 50rem;
   /* This margin assignment centers the div */
@@ -23,10 +23,12 @@ html {
   background-color: #b7c8a6;
   color: #181b15;
   font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-variant-ligatures: none;
   border-radius: var(--border-radius-amount);
   margin: var(--component-spacing);
   grid-area: screen;
   padding: 2rem;
+  padding-left: 1rem;
   text-align: right;
   align-items: center;
   min-height: 2rem;
