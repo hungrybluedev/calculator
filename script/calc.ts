@@ -15,9 +15,22 @@ let buttonActivatedTiming = {
 
 let MAX_DIGITS = 20;
 let BUFFER = 3;
-let EQUATION_PRECISION = 3;
+let EQUATION_PRECISION = 4;
+
+let TRUNCATION_TRIGGER = ".";
+let ROUND_UP_TRIGGER = ".";
+
+for (let i = 0; i < EQUATION_PRECISION; i++) {
+  TRUNCATION_TRIGGER += "0";
+  ROUND_UP_TRIGGER += "9";
+}
+
+let _0 = new Decimal(0);
 let _1 = new Decimal(1);
 let _100 = new Decimal(100);
+let _NaN = new Decimal(NaN);
+
+let KBD_INPUT_DELAY = 50;
 
 //#endregion
 
@@ -57,6 +70,7 @@ interface Calculator {
   ) => Decimal.Instance;
   primary: string;
   equation: string;
+  allowDeletion: Boolean;
 }
 
 //#endregion
@@ -130,11 +144,15 @@ let isDigit = (input: string): Boolean => {
 };
 
 let isBinaryOperation = (input: string): Boolean => {
-  return "+-*/".includes(input);
+  return "+|-|*|/|&times;|&divide;|add|sub|mul|div".includes(input);
 };
 
 let isUnaryOperation = (input: string): Boolean => {
-  return "rcp|pct|sqrt|sqr|pm".includes(input);
+  return "%|rcp|pct|sqrt|sqr|pm".includes(input);
+};
+
+let isClearCommand = (input: string): Boolean => {
+  return "Backspace|a|c".includes(input);
 };
 
 let lastChar = (input: string) => {
@@ -144,9 +162,15 @@ let lastChar = (input: string) => {
 let mapOp = (operation: string) => {
   switch (operation) {
     case "/":
+    case "div":
       return "&divide;";
     case "*":
+    case "mul":
       return "&times;";
+    case "add":
+      return "+";
+    case "sub":
+      return "-";
     default:
       return operation;
   }
@@ -154,21 +178,26 @@ let mapOp = (operation: string) => {
 
 let relevantPart = (value: string, precision: number): string => {
   // Quick corner cases
-  if (value === "0." || value === ".") {
+  if (value === "0." || value === "." || value === "") {
     return "0.";
   }
 
   let generatedString = new Decimal(value)
     .toDecimalPlaces(precision)
     .toString();
-  let optionalSuffix = lastChar(value) === "." ? "." : "";
-  // Add back any zeros we lost
-  let zeroPadding = "";
-  while (lastChar(value) === "0") {
-    value = value.substring(0, value.length - 1);
-    zeroPadding += "0";
+
+  if (generatedString.includes(TRUNCATION_TRIGGER)) {
+    generatedString = new Decimal(value).truncated().toString();
   }
-  return generatedString + zeroPadding + optionalSuffix;
+  if (generatedString.includes(ROUND_UP_TRIGGER)) {
+    generatedString = new Decimal(value).truncated().add(1).toString();
+  }
+
+  let shouldWeAddDot = !generatedString.includes(".");
+  let optionalSuffix = shouldWeAddDot ? "." : "";
+  let proposed = generatedString + optionalSuffix;
+
+  return proposed;
 };
 
 /**
@@ -185,6 +214,14 @@ let updateDisplays = (calculator: Calculator) => {
   calculator.equationDisplay.innerHTML = calculator.equation || "0.";
   calculator.primaryDisplay.innerHTML =
     relevantPart(calculator.primary, MAX_DIGITS) || "0.";
+};
+
+let getDecimal = (value: string): Decimal.Instance => {
+  return value === "." || !value ? _0 : new Decimal(value);
+};
+
+let removeLastChar = (value: string): string => {
+  return value.substring(0, value.length - 1);
 };
 
 //#endregion
@@ -212,7 +249,11 @@ let multiplication = (
 let division = (
   args: [Decimal.Instance, Decimal.Instance]
 ): Decimal.Instance => {
-  return args[0].div(args[1]);
+  try {
+    return args[0].div(args[1]);
+  } catch {
+    return _NaN;
+  }
 };
 
 let percentage = (value: Decimal.Instance): Decimal.Instance => {
@@ -260,19 +301,28 @@ let handleDigit = (calculator: Calculator, digit: string) => {
     return;
   }
 
-  calculator.primary = currentContent + digit;
+  // Add zero only if there is a digit or something already
+  if (calculator.primary || digit !== "0") {
+    calculator.primary = currentContent + digit;
+  }
 };
 
 let handleBinaryOperation = (calculator: Calculator, operation: string) => {
   let last = lastChar(calculator.equation);
+  let lastOpRemoved = calculator.equation;
+
+  if (last === ";") {
+    let position = calculator.equation.lastIndexOf("&");
+    lastOpRemoved = lastOpRemoved.substring(0, position + 1);
+    last = calculator.equation.substring(position);
+  }
 
   if (isBinaryOperation(last) && !calculator.primary) {
     // If the user accidentally pressed the wrong operation
     // button, give them a chance to change the operation
+    lastOpRemoved = removeLastChar(lastOpRemoved);
 
-    let len = calculator.equation.length;
-    calculator.equation =
-      calculator.equation.substring(0, len - 1) + mapOp(operation);
+    calculator.equation = lastOpRemoved + mapOp(operation);
   } else {
     if (calculator.lastOperation) {
       // There exists an unevaluated operation
@@ -283,29 +333,42 @@ let handleBinaryOperation = (calculator: Calculator, operation: string) => {
     }
 
     if (calculator.primary) {
-      calculator.partial = new Decimal(calculator.primary);
+      calculator.partial = getDecimal(calculator.primary);
     }
-    calculator.equation +=
-      relevantPart(calculator.primary, EQUATION_PRECISION) + mapOp(operation);
+    let valueForDisplay = relevantPart(calculator.primary, EQUATION_PRECISION);
+    calculator.equation += valueForDisplay + mapOp(operation);
     calculator.primary = "";
   }
 
   // Store the lastOperation, which will be useful when
   // we need the final result. It is called by handleEquals
+  let btnIndex: number;
   switch (operation) {
     case "+":
+    case "add":
+      btnIndex = 0;
       calculator.lastOperation = addition;
       break;
     case "-":
+    case "sub":
+      btnIndex = 1;
       calculator.lastOperation = subtraction;
       break;
     case "*":
+    case "mul":
+      btnIndex = 2;
       calculator.lastOperation = multiplication;
       break;
     case "/":
+    case "div":
+      btnIndex = 3;
       calculator.lastOperation = division;
       break;
   }
+  calculator.operationButtons[btnIndex].animate(
+    buttonActivatedKeyFrames,
+    buttonActivatedTiming
+  );
 };
 
 let handleEquals = (calculator: Calculator) => {
@@ -315,7 +378,7 @@ let handleEquals = (calculator: Calculator) => {
 
   let args: [Decimal.Instance, Decimal.Instance] = [
     calculator.partial,
-    new Decimal(calculator.primary),
+    getDecimal(calculator.primary),
   ];
 
   calculator.partial = calculator.lastOperation(args);
@@ -325,34 +388,70 @@ let handleEquals = (calculator: Calculator) => {
     .toDecimalPlaces(MAX_DIGITS + BUFFER)
     .toString();
   calculator.equation = "";
+  calculator.allowDeletion = false;
 };
 
 let handleUnaryOperation = (calculator: Calculator, operation: string) => {
   if (!calculator.primary) {
     return;
   }
-  let currentValue = new Decimal(calculator.primary);
-  console.log(operation);
+  let currentValue = getDecimal(calculator.primary);
+  // rcp|pct|sqrt|sqr|pm
+  let btnIndex = 5;
   switch (operation) {
-    case "btn-pct":
-      currentValue = percentage(currentValue);
-      break;
-    case "btn-rcp":
+    case "rcp":
+      btnIndex += 0;
       currentValue = reciprocal(currentValue);
       break;
-    case "btn-sqrt":
+    case "%":
+    case "pct":
+      btnIndex += 1;
+      currentValue = percentage(currentValue);
+      break;
+    case "sqrt":
+      btnIndex += 2;
       currentValue = sqrt(currentValue);
       break;
-    case "btn-sqr":
+    case "sqr":
+      btnIndex += 3;
       currentValue = square(currentValue);
       break;
-    case "btn-pm":
+    case "pm":
+      btnIndex += 4;
       currentValue = negate(currentValue);
       break;
   }
+
+  calculator.operationButtons[btnIndex].animate(
+    buttonActivatedKeyFrames,
+    buttonActivatedTiming
+  );
+
   calculator.primary = currentValue
     .toDecimalPlaces(MAX_DIGITS + BUFFER)
     .toString();
+};
+
+let handleClearButton = (calculator: Calculator, id: string) => {
+  switch (id) {
+    case "a":
+    case "btn-ac":
+      calculator.equation = "";
+      calculator.partial = _0;
+      calculator.memory = _0;
+    case "c":
+    case "btn-cl":
+      calculator.primary = "";
+      break;
+    case "Backspace":
+    case "btn-del":
+      if (calculator.allowDeletion) {
+        calculator.primary = removeLastChar(calculator.primary);
+      } else {
+        calculator.primary = "";
+        calculator.allowDeletion = true;
+      }
+  }
 };
 
 /**
@@ -365,9 +464,9 @@ let handleUnaryOperation = (calculator: Calculator, operation: string) => {
  */
 let handleKeyBoardInput = (calculator: Calculator, event: KeyboardEvent) => {
   let input = event.key;
-  if (event.key === "/") {
-    event.preventDefault();
-  }
+  // if (event.key === "/") {
+  //   event.preventDefault();
+  // }
 
   // event.key is a printable representation of the
   // key pressed. If it is a single character, we can
@@ -389,9 +488,10 @@ let handleKeyBoardInput = (calculator: Calculator, event: KeyboardEvent) => {
     }
   }
 
-  if (isUnaryOperation(input)) {
-    handleBinaryOperation(calculator, input);
+  if (isClearCommand(input)) {
+    handleClearButton(calculator, input);
   }
+
   updateDisplays(calculator);
 };
 
@@ -409,20 +509,20 @@ let calculator = {
   // Displays
   equationDisplay: document.getElementById("equation") as HTMLDivElement,
   primaryDisplay: document.getElementById("primary") as HTMLDivElement,
-  memory: new Decimal(0),
-  partial: new Decimal(0),
+  memory: _0,
+  partial: _0,
   primary: "",
   equation: "",
   lastOperation: undefined,
+  allowDeletion: true,
 };
 
 // Set the precision and the rounding mode
 Decimal.set({
   precision: MAX_DIGITS + BUFFER,
   rounding: Decimal.ROUND_HALF_EVEN,
+  toExpPos: 8,
 });
-
-console.log(calculator);
 
 // Pressing a button has the same effect as typing
 // in the necessary digit from the keyboard.
@@ -437,8 +537,10 @@ calculator.numericButtons.forEach((button) => {
 });
 
 calculator.operationButtons.forEach((button) => {
-  let content = button.innerHTML;
-  if (content === "=") {
+  // Remove the prefix "btn-"
+  let content = button.id.substring(4);
+
+  if (content === "eq") {
     button.addEventListener("click", (_) => {
       handleEquals(calculator);
       updateDisplays(calculator);
@@ -449,22 +551,26 @@ calculator.operationButtons.forEach((button) => {
       handleBinaryOperation(calculator, content);
       updateDisplays(calculator);
     });
-  } else {
+  } else if (isUnaryOperation(content)) {
     button.addEventListener("click", (_) => {
-      handleUnaryOperation(calculator, button.id);
+      handleUnaryOperation(calculator, content);
       updateDisplays(calculator);
     });
   }
 });
+calculator.clearButtons.forEach((button) => {
+  button.addEventListener("click", (_) => {
+    handleClearButton(calculator, button.id);
+    updateDisplays(calculator);
+  });
+});
 
 // Add the key listener to the calculator
 document.onkeydown = (event) => {
-  if ("Backspace".includes(event.key)) {
+  if ("Backspace|/".includes(event.key)) {
     event.preventDefault();
   }
+  setTimeout(() => handleKeyBoardInput(calculator, event), KBD_INPUT_DELAY);
 };
-document.addEventListener("keypress", (event) => {
-  handleKeyBoardInput(calculator, event);
-});
 
 updateDisplays(calculator);
