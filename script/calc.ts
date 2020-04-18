@@ -2,35 +2,61 @@
 
 import Decimal from "./decimal.js";
 
+/**
+ * The click animation of a button is simple. It has 3 keyframes:
+ * 1. Original, i.e. no change.
+ * 2. Reduce brightness to 0.2.
+ * 3. Return brightness to full.
+ *
+ * The original brightness is kept to accommodate for hover brightness.
+ * A button animation can be triggered on click or when the appropriate
+ * keyboard input is received.
+ */
 let buttonActivatedKeyFrames = [
   {},
   { filter: "brightness(0.2)" },
   { filter: "brightness(1.0)" },
 ];
 
+// The timing properties of the button activated animation.
 let buttonActivatedTiming = {
+  // Noticeable duration, not too long.
   duration: 150,
+  // We don't want repetitions.
   iterations: 1,
 };
 
+// This is the number of digits that the calculator will show.
+// In case it is increased to a value above 20, remember to
+// adjust the width of the calculator accordingly.
 let MAX_DIGITS = 20;
+// This is the number of digits of "cushioning" we keep
+// in order to ensure that the calculations are accurate.
 let BUFFER = 3;
+// This is the number of digits we are willing to display
+// in the equation line. Shorter because it looks cleaner
 let EQUATION_PRECISION = 4;
 
-let TRUNCATION_TRIGGER = ".";
-let ROUND_UP_TRIGGER = ".";
+// Sometimes even 23 (or whatever MAX_DIGITS + BUFFER is) digits
+// is not enough for preserving the accuracy perfectly. We use
+// some obvious trigger patters to provide cleaner results.
+let TRUNCATION_TRIGGER = "."; // .0000...
+let ROUND_UP_TRIGGER = "."; // .9999...
 
 for (let i = 0; i < EQUATION_PRECISION; i++) {
   TRUNCATION_TRIGGER += "0";
   ROUND_UP_TRIGGER += "9";
 }
 
+// Constants that are required frequently for various operations
 let _0 = new Decimal(0);
 let _1 = new Decimal(1);
 let _100 = new Decimal(100);
 let _NaN = new Decimal(NaN);
 
 let KBD_INPUT_DELAY = 50;
+
+let OUT_OF_MEMORY = "Out of Memory";
 
 //#endregion
 
@@ -70,7 +96,7 @@ interface Calculator {
   ) => Decimal.Instance;
   primary: string;
   equation: string;
-  allowDeletion: Boolean;
+  allowChange: Boolean;
 }
 
 //#endregion
@@ -85,15 +111,22 @@ interface Calculator {
  * Numeric buttons include all digit inputs, the BigInt point, as
  * well as the plus/minus sign change button.
  *
+ * Order of buttons returned (easy reference for indexing):
+ * 0. through 9. - Corresponding number buttons.
+ * 10. Dot (Decimal Point)
+ *
  * @returns {Array<HTMLButtonElement>} All numeric input buttons.
  */
 let getNumericButtons = (): Array<HTMLButtonElement> => {
-  let operationButtons = getElementsUsingEncodedString("dot");
+  let operationButtons = [] as Array<HTMLButtonElement>;
   for (let i = 0; i <= 9; i++) {
     operationButtons.push(
       document.getElementById("btn-" + i) as HTMLButtonElement
     );
   }
+  operationButtons.push(
+    document.getElementById("btn-dot") as HTMLButtonElement
+  );
   return operationButtons;
 };
 
@@ -103,6 +136,18 @@ let getNumericButtons = (): Array<HTMLButtonElement> => {
  * Operations can either be binary, like addition, division, etc. or unary
  * like reciprocal, square, square root. Equality is considered
  * an operation. It calculates the result of previous operations.
+ *
+ * Order of buttons returned (easy reference for indexing):
+ * 0. Addition
+ * 1. Subtraction
+ * 2. Multiplication
+ * 3. Division
+ * 4. Equality
+ * 5. Reciprocal
+ * 6. Percentage
+ * 7. Square root
+ * 8. Square
+ * 9. Plus/Minus
  *
  * @returns {Array<HTMLButtonElement>} All operation buttons.
  */
@@ -114,11 +159,31 @@ let getOperationButtons = (): Array<HTMLButtonElement> => {
 
 /**
  * Returns the memory buttons.
+ *
+ * The memory buttons are the smaller ones and constitute the
+ * first row of buttons. They operate exclusively with the
+ * internal memory storage.
+ *
+ * Order of buttons returned (easy reference for indexing):
+ * 0. Memory Clean
+ * 1. Memory Recall
+ * 2. Memory Plus (Add)
+ * 3. Memory Minus (Subtract)
+ *
+ * @returns {Array<HTMLButtonElement>} All memory buttons.
  */
 let getMemoryButtons = (): Array<HTMLButtonElement> => {
   return getElementsUsingEncodedString("mc|mr|mp|mm");
 };
 
+/**
+ * Returns the three clear buttons.
+ *
+ * The buttons in order:
+ * 0. Clear all - Clears the primary as well as the equation displays
+ * 1. Clear - Clears only the primary, leaves the equation untouched
+ * 2. Delete - Deletes the last entered digit (or dot) from the primary.
+ */
 let getClearButtons = (): Array<HTMLButtonElement> => {
   return getElementsUsingEncodedString("ac|cl|del");
 };
@@ -181,16 +246,21 @@ let relevantPart = (value: string, precision: number): string => {
   if (value === "0." || value === "." || value === "") {
     return "0.";
   }
+  if (value === OUT_OF_MEMORY) {
+    return OUT_OF_MEMORY;
+  }
 
-  let generatedString = new Decimal(value)
-    .toDecimalPlaces(precision)
-    .toString();
+  let generatedString = new Decimal(value).toDecimalPlaces(precision).toFixed();
 
   if (generatedString.includes(TRUNCATION_TRIGGER)) {
     generatedString = new Decimal(value).truncated().toString();
   }
   if (generatedString.includes(ROUND_UP_TRIGGER)) {
     generatedString = new Decimal(value).truncated().add(1).toString();
+  }
+
+  if (generatedString.length > MAX_DIGITS) {
+    return OUT_OF_MEMORY;
   }
 
   let shouldWeAddDot = !generatedString.includes(".");
@@ -212,8 +282,16 @@ let relevantPart = (value: string, precision: number): string => {
  */
 let updateDisplays = (calculator: Calculator) => {
   calculator.equationDisplay.innerHTML = calculator.equation || "0.";
-  calculator.primaryDisplay.innerHTML =
-    relevantPart(calculator.primary, MAX_DIGITS) || "0.";
+  let textToDisplay = relevantPart(calculator.primary, MAX_DIGITS);
+
+  if (textToDisplay === OUT_OF_MEMORY) {
+    calculator.partial = _0;
+    calculator.equation = "";
+    calculator.primary = OUT_OF_MEMORY;
+    calculator.allowChange = false;
+  }
+
+  calculator.primaryDisplay.innerHTML = textToDisplay || "0.";
 };
 
 let getDecimal = (value: string): Decimal.Instance => {
@@ -281,8 +359,13 @@ let sqrt = (value: Decimal.Instance): Decimal.Instance => {
 //#region Handler functions
 
 let handleDigit = (calculator: Calculator, digit: string) => {
+  if (!calculator.allowChange) {
+    calculator.primary = "";
+    calculator.allowChange = true;
+  }
+
   let isDot = digit === ".";
-  let index = isDot ? 0 : 1 + parseInt(digit);
+  let index = isDot ? 10 : parseInt(digit);
   let button = calculator.numericButtons[index];
 
   button.animate(buttonActivatedKeyFrames, buttonActivatedTiming);
@@ -332,12 +415,27 @@ let handleBinaryOperation = (calculator: Calculator, operation: string) => {
       updateDisplays(calculator);
     }
 
+    if (calculator.primary === OUT_OF_MEMORY) {
+      calculator.lastOperation = undefined;
+      calculator.allowChange = false;
+      return;
+    }
+
     if (calculator.primary) {
       calculator.partial = getDecimal(calculator.primary);
     }
+
     let valueForDisplay = relevantPart(calculator.primary, EQUATION_PRECISION);
-    calculator.equation += valueForDisplay + mapOp(operation);
-    calculator.primary = "";
+
+    if (valueForDisplay === OUT_OF_MEMORY) {
+      calculator.equation = OUT_OF_MEMORY;
+      calculator.lastOperation = undefined;
+      calculator.allowChange = false;
+      return;
+    } else {
+      calculator.equation += valueForDisplay + mapOp(operation);
+      calculator.primary = "";
+    }
   }
 
   // Store the lastOperation, which will be useful when
@@ -388,11 +486,11 @@ let handleEquals = (calculator: Calculator) => {
     .toDecimalPlaces(MAX_DIGITS + BUFFER)
     .toString();
   calculator.equation = "";
-  calculator.allowDeletion = false;
+  calculator.allowChange = false;
 };
 
 let handleUnaryOperation = (calculator: Calculator, operation: string) => {
-  if (!calculator.primary) {
+  if (!calculator.primary || calculator.primary === OUT_OF_MEMORY) {
     return;
   }
   let currentValue = getDecimal(calculator.primary);
@@ -427,32 +525,42 @@ let handleUnaryOperation = (calculator: Calculator, operation: string) => {
     buttonActivatedTiming
   );
 
-  calculator.primary = currentValue
-    .toDecimalPlaces(MAX_DIGITS + BUFFER)
-    .toString();
+  let result = currentValue.toDecimalPlaces(MAX_DIGITS + BUFFER).toString();
+
+  calculator.primary = relevantPart(result, MAX_DIGITS);
 };
 
 let handleClearButton = (calculator: Calculator, id: string) => {
+  let button: HTMLButtonElement;
   switch (id) {
     case "a":
     case "btn-ac":
       calculator.equation = "";
+      calculator.primary = "";
       calculator.partial = _0;
       calculator.memory = _0;
+      button = calculator.clearButtons[0];
+      break;
     case "c":
     case "btn-cl":
       calculator.primary = "";
+      button = calculator.clearButtons[1];
       break;
     case "Backspace":
     case "btn-del":
-      if (calculator.allowDeletion) {
+      button = calculator.clearButtons[2];
+      if (calculator.allowChange) {
         calculator.primary = removeLastChar(calculator.primary);
       } else {
         calculator.primary = "";
-        calculator.allowDeletion = true;
+        calculator.allowChange = true;
       }
+      break;
   }
+  button.animate(buttonActivatedKeyFrames, buttonActivatedTiming);
 };
+
+let handleMemoryButton = (calculator: Calculator, id: string) => {};
 
 /**
  * Handles the keyboard input and performs the necessary actions.
@@ -464,16 +572,19 @@ let handleClearButton = (calculator: Calculator, id: string) => {
  */
 let handleKeyBoardInput = (calculator: Calculator, event: KeyboardEvent) => {
   let input = event.key;
-  // if (event.key === "/") {
-  //   event.preventDefault();
-  // }
 
   // event.key is a printable representation of the
   // key pressed. If it is a single character, we can
-  // test if it is a digit. It can also be an operation
+  // test if it is a digit. It can also be a binary operation
 
   if (input === "=" || input === "Enter") {
     handleEquals(calculator);
+    updateDisplays(calculator);
+    return;
+  }
+
+  if (isClearCommand(input)) {
+    handleClearButton(calculator, input);
     updateDisplays(calculator);
     return;
   }
@@ -486,10 +597,6 @@ let handleKeyBoardInput = (calculator: Calculator, event: KeyboardEvent) => {
     if (isBinaryOperation(input)) {
       handleBinaryOperation(calculator, input);
     }
-  }
-
-  if (isClearCommand(input)) {
-    handleClearButton(calculator, input);
   }
 
   updateDisplays(calculator);
@@ -514,7 +621,7 @@ let calculator = {
   primary: "",
   equation: "",
   lastOperation: undefined,
-  allowDeletion: true,
+  allowChange: true,
 };
 
 // Set the precision and the rounding mode
@@ -558,6 +665,7 @@ calculator.operationButtons.forEach((button) => {
     });
   }
 });
+
 calculator.clearButtons.forEach((button) => {
   button.addEventListener("click", (_) => {
     handleClearButton(calculator, button.id);
@@ -567,6 +675,10 @@ calculator.clearButtons.forEach((button) => {
 
 // Add the key listener to the calculator
 document.onkeydown = (event) => {
+  // preventDefault stops the following:
+  // 1. Backspace from returning to the previous page
+  // 2. / from searching in Firefox
+  // 3. Also, | from activating. We use | as a separator in strings
   if ("Backspace|/".includes(event.key)) {
     event.preventDefault();
   }

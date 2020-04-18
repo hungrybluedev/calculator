@@ -1,4 +1,3 @@
-//#region Imports, predefined constants
 import Decimal from "./decimal.js";
 let buttonActivatedKeyFrames = [
     {},
@@ -23,48 +22,24 @@ let _1 = new Decimal(1);
 let _100 = new Decimal(100);
 let _NaN = new Decimal(NaN);
 let KBD_INPUT_DELAY = 50;
-//#endregion
-//#region Element retrieval functions
-/**
- * Returns the numeric input buttons from the document.
- * The idea is to fetch all the buttons at once and access them easily
- * through the array later.
- *
- * Numeric buttons include all digit inputs, the BigInt point, as
- * well as the plus/minus sign change button.
- *
- * @returns {Array<HTMLButtonElement>} All numeric input buttons.
- */
+let OUT_OF_MEMORY = "Out of Memory";
 let getNumericButtons = () => {
-    let operationButtons = getElementsUsingEncodedString("dot");
+    let operationButtons = [];
     for (let i = 0; i <= 9; i++) {
         operationButtons.push(document.getElementById("btn-" + i));
     }
+    operationButtons.push(document.getElementById("btn-dot"));
     return operationButtons;
 };
-/**
- * Returns all the operation buttons from the document.
- *
- * Operations can either be binary, like addition, division, etc. or unary
- * like reciprocal, square, square root. Equality is considered
- * an operation. It calculates the result of previous operations.
- *
- * @returns {Array<HTMLButtonElement>} All operation buttons.
- */
 let getOperationButtons = () => {
     return getElementsUsingEncodedString("add|sub|mul|div|eq|rcp|pct|sqrt|sqr|pm");
 };
-/**
- * Returns the memory buttons.
- */
 let getMemoryButtons = () => {
     return getElementsUsingEncodedString("mc|mr|mp|mm");
 };
 let getClearButtons = () => {
     return getElementsUsingEncodedString("ac|cl|del");
 };
-//#endregion
-//#region Utility functions
 let getElementsUsingEncodedString = (encodedString) => {
     let ids = encodedString.split("|");
     let storage = [];
@@ -103,38 +78,37 @@ let mapOp = (operation) => {
     }
 };
 let relevantPart = (value, precision) => {
-    // Quick corner cases
     if (value === "0." || value === "." || value === "") {
         return "0.";
     }
-    let generatedString = new Decimal(value)
-        .toDecimalPlaces(precision)
-        .toString();
+    if (value === OUT_OF_MEMORY) {
+        return OUT_OF_MEMORY;
+    }
+    let generatedString = new Decimal(value).toDecimalPlaces(precision).toFixed();
     if (generatedString.includes(TRUNCATION_TRIGGER)) {
         generatedString = new Decimal(value).truncated().toString();
     }
     if (generatedString.includes(ROUND_UP_TRIGGER)) {
         generatedString = new Decimal(value).truncated().add(1).toString();
     }
+    if (generatedString.length > MAX_DIGITS) {
+        return OUT_OF_MEMORY;
+    }
     let shouldWeAddDot = !generatedString.includes(".");
     let optionalSuffix = shouldWeAddDot ? "." : "";
     let proposed = generatedString + optionalSuffix;
     return proposed;
 };
-/**
- * Updates the primary and the equation displays based
- * on the string values of equation and primary; both of
- * these are properties of calculator.
- *
- * NOTE: It is important to make sure that all other states
- * are up to date.
- *
- * @param {Calculator} calculator The object to update.
- */
 let updateDisplays = (calculator) => {
     calculator.equationDisplay.innerHTML = calculator.equation || "0.";
-    calculator.primaryDisplay.innerHTML =
-        relevantPart(calculator.primary, MAX_DIGITS) || "0.";
+    let textToDisplay = relevantPart(calculator.primary, MAX_DIGITS);
+    if (textToDisplay === OUT_OF_MEMORY) {
+        calculator.partial = _0;
+        calculator.equation = "";
+        calculator.primary = OUT_OF_MEMORY;
+        calculator.allowChange = false;
+    }
+    calculator.primaryDisplay.innerHTML = textToDisplay || "0.";
 };
 let getDecimal = (value) => {
     return value === "." || !value ? _0 : new Decimal(value);
@@ -142,8 +116,6 @@ let getDecimal = (value) => {
 let removeLastChar = (value) => {
     return value.substring(0, value.length - 1);
 };
-//#endregion
-//#region Operation functions
 let addition = (args) => {
     return args[0].add(args[1]);
 };
@@ -176,19 +148,19 @@ let square = (value) => {
 let sqrt = (value) => {
     return value.sqrt();
 };
-//#endregion
-//#region Handler functions
 let handleDigit = (calculator, digit) => {
+    if (!calculator.allowChange) {
+        calculator.primary = "";
+        calculator.allowChange = true;
+    }
     let isDot = digit === ".";
-    let index = isDot ? 0 : 1 + parseInt(digit);
+    let index = isDot ? 10 : parseInt(digit);
     let button = calculator.numericButtons[index];
     button.animate(buttonActivatedKeyFrames, buttonActivatedTiming);
     let currentContent = calculator.primary;
-    // If the BigInt point is already present, we do not add it again
     if (isDot && currentContent.includes(".")) {
         return;
     }
-    // If the display is full and cannot store more digits, we return
     let precision = calculator.primary.length;
     if (isDot) {
         precision -= 1;
@@ -196,7 +168,6 @@ let handleDigit = (calculator, digit) => {
     if (precision >= MAX_DIGITS) {
         return;
     }
-    // Add zero only if there is a digit or something already
     if (calculator.primary || digit !== "0") {
         calculator.primary = currentContent + digit;
     }
@@ -210,27 +181,34 @@ let handleBinaryOperation = (calculator, operation) => {
         last = calculator.equation.substring(position);
     }
     if (isBinaryOperation(last) && !calculator.primary) {
-        // If the user accidentally pressed the wrong operation
-        // button, give them a chance to change the operation
         lastOpRemoved = removeLastChar(lastOpRemoved);
         calculator.equation = lastOpRemoved + mapOp(operation);
     }
     else {
         if (calculator.lastOperation) {
-            // There exists an unevaluated operation
-            // Complete that first, then we proceed.
             handleEquals(calculator);
             updateDisplays(calculator);
+        }
+        if (calculator.primary === OUT_OF_MEMORY) {
+            calculator.lastOperation = undefined;
+            calculator.allowChange = false;
+            return;
         }
         if (calculator.primary) {
             calculator.partial = getDecimal(calculator.primary);
         }
         let valueForDisplay = relevantPart(calculator.primary, EQUATION_PRECISION);
-        calculator.equation += valueForDisplay + mapOp(operation);
-        calculator.primary = "";
+        if (valueForDisplay === OUT_OF_MEMORY) {
+            calculator.equation = OUT_OF_MEMORY;
+            calculator.lastOperation = undefined;
+            calculator.allowChange = false;
+            return;
+        }
+        else {
+            calculator.equation += valueForDisplay + mapOp(operation);
+            calculator.primary = "";
+        }
     }
-    // Store the lastOperation, which will be useful when
-    // we need the final result. It is called by handleEquals
     let btnIndex;
     switch (operation) {
         case "+":
@@ -270,14 +248,13 @@ let handleEquals = (calculator) => {
         .toDecimalPlaces(MAX_DIGITS + BUFFER)
         .toString();
     calculator.equation = "";
-    calculator.allowDeletion = false;
+    calculator.allowChange = false;
 };
 let handleUnaryOperation = (calculator, operation) => {
-    if (!calculator.primary) {
+    if (!calculator.primary || calculator.primary === OUT_OF_MEMORY) {
         return;
     }
     let currentValue = getDecimal(calculator.primary);
-    // rcp|pct|sqrt|sqr|pm
     let btnIndex = 5;
     switch (operation) {
         case "rcp":
@@ -303,50 +280,49 @@ let handleUnaryOperation = (calculator, operation) => {
             break;
     }
     calculator.operationButtons[btnIndex].animate(buttonActivatedKeyFrames, buttonActivatedTiming);
-    calculator.primary = currentValue
-        .toDecimalPlaces(MAX_DIGITS + BUFFER)
-        .toString();
+    let result = currentValue.toDecimalPlaces(MAX_DIGITS + BUFFER).toString();
+    calculator.primary = relevantPart(result, MAX_DIGITS);
 };
 let handleClearButton = (calculator, id) => {
+    let button;
     switch (id) {
         case "a":
         case "btn-ac":
             calculator.equation = "";
+            calculator.primary = "";
             calculator.partial = _0;
             calculator.memory = _0;
+            button = calculator.clearButtons[0];
+            break;
         case "c":
         case "btn-cl":
             calculator.primary = "";
+            button = calculator.clearButtons[1];
             break;
         case "Backspace":
         case "btn-del":
-            if (calculator.allowDeletion) {
+            button = calculator.clearButtons[2];
+            if (calculator.allowChange) {
                 calculator.primary = removeLastChar(calculator.primary);
             }
             else {
                 calculator.primary = "";
-                calculator.allowDeletion = true;
+                calculator.allowChange = true;
             }
+            break;
     }
+    button.animate(buttonActivatedKeyFrames, buttonActivatedTiming);
 };
-/**
- * Handles the keyboard input and performs the necessary actions.
- * Prevents the default action to ensure that unintended behaviour
- * does not occur.
- *
- * @param {Calculator} calculator The state object to manipulate.
- * @param {KeyboardEvent} event The event to react to.
- */
+let handleMemoryButton = (calculator, id) => { };
 let handleKeyBoardInput = (calculator, event) => {
     let input = event.key;
-    // if (event.key === "/") {
-    //   event.preventDefault();
-    // }
-    // event.key is a printable representation of the
-    // key pressed. If it is a single character, we can
-    // test if it is a digit. It can also be an operation
     if (input === "=" || input === "Enter") {
         handleEquals(calculator);
+        updateDisplays(calculator);
+        return;
+    }
+    if (isClearCommand(input)) {
+        handleClearButton(calculator, input);
         updateDisplays(calculator);
         return;
     }
@@ -358,21 +334,13 @@ let handleKeyBoardInput = (calculator, event) => {
             handleBinaryOperation(calculator, input);
         }
     }
-    if (isClearCommand(input)) {
-        handleClearButton(calculator, input);
-    }
     updateDisplays(calculator);
 };
-//#endregion
-/// GENERAL CODE ///
-// Initialize the necessary components for the calculator
 let calculator = {
-    // Buttons
     numericButtons: getNumericButtons(),
     operationButtons: getOperationButtons(),
     memoryButtons: getMemoryButtons(),
     clearButtons: getClearButtons(),
-    // Displays
     equationDisplay: document.getElementById("equation"),
     primaryDisplay: document.getElementById("primary"),
     memory: _0,
@@ -380,16 +348,13 @@ let calculator = {
     primary: "",
     equation: "",
     lastOperation: undefined,
-    allowDeletion: true,
+    allowChange: true,
 };
-// Set the precision and the rounding mode
 Decimal.set({
     precision: MAX_DIGITS + BUFFER,
     rounding: Decimal.ROUND_HALF_EVEN,
     toExpPos: 8,
 });
-// Pressing a button has the same effect as typing
-// in the necessary digit from the keyboard.
 calculator.numericButtons.forEach((button) => {
     let content = button.innerHTML;
     if (isDigit(content)) {
@@ -400,7 +365,6 @@ calculator.numericButtons.forEach((button) => {
     }
 });
 calculator.operationButtons.forEach((button) => {
-    // Remove the prefix "btn-"
     let content = button.id.substring(4);
     if (content === "eq") {
         button.addEventListener("click", (_) => {
@@ -409,7 +373,6 @@ calculator.operationButtons.forEach((button) => {
         });
     }
     else if (isBinaryOperation(content)) {
-        // We have the binary operators here
         button.addEventListener("click", (_) => {
             handleBinaryOperation(calculator, content);
             updateDisplays(calculator);
@@ -428,7 +391,6 @@ calculator.clearButtons.forEach((button) => {
         updateDisplays(calculator);
     });
 });
-// Add the key listener to the calculator
 document.onkeydown = (event) => {
     if ("Backspace|/".includes(event.key)) {
         event.preventDefault();
@@ -436,3 +398,4 @@ document.onkeydown = (event) => {
     setTimeout(() => handleKeyBoardInput(calculator, event), KBD_INPUT_DELAY);
 };
 updateDisplays(calculator);
+//# sourceMappingURL=calc.js.map
