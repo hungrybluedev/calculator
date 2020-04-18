@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "pretty": true,
     "watch": true,
+    "removeComments": true,
+    "sourceMap": true,
   }
 }
